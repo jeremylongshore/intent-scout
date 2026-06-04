@@ -2,7 +2,11 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
-RUN npm i -g pnpm && pnpm install --frozen-lockfile
+# Pin pnpm to v9 to match CI (pnpm/action-setup@v4 with version: 9).
+# pnpm v10 stopped reading the `pnpm.onlyBuiltDependencies` field from
+# package.json and treats un-approved native build scripts (better-sqlite3,
+# esbuild) as a hard error under --frozen-lockfile, which broke this build.
+RUN npm i -g pnpm@9 && pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build
 
