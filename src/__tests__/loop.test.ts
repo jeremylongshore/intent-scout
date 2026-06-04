@@ -63,9 +63,12 @@ describe("Agent Loop", () => {
     expect(execTurn!.toolCalls[0].name).toBe("exec");
     expect(execTurn!.toolCalls[0].error).toBeUndefined();
 
-    // Verify conway.exec was called
+    // Verify the model-requested command reached conway.exec.
+    // NOTE: the wake-up bootstrap phase runs its own fixed exec probes
+    // (e.g. "ls -la ~/ ...") before the inference-driven turn, so we assert
+    // the mocked command is present among the calls rather than at a fixed index.
     expect(conway.execCalls.length).toBeGreaterThanOrEqual(1);
-    expect(conway.execCalls[0].command).toBe("echo hello");
+    expect(conway.execCalls.map((c) => c.command)).toContain("echo hello");
   });
 
   it("forbidden patterns blocked", async () => {
@@ -95,8 +98,14 @@ describe("Agent Loop", () => {
     const execCall = execTurn!.toolCalls.find((tc) => tc.name === "exec");
     expect(execCall!.result).toContain("Blocked");
 
-    // conway.exec should NOT have been called
-    expect(conway.execCalls.length).toBe(0);
+    // The forbidden command must never reach conway.exec — it is blocked
+    // inside the tool layer before dispatch.
+    // NOTE: the wake-up bootstrap phase runs benign exec probes that DO reach
+    // conway, so we assert specifically that the forbidden command is absent
+    // rather than that zero exec calls occurred.
+    expect(conway.execCalls.map((c) => c.command)).not.toContain(
+      "rm -rf ~/.automaton",
+    );
   });
 
   it("low credits forces low-compute mode", async () => {
