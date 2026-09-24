@@ -9,7 +9,7 @@
 #
 # NOTE on docker-compose integration:
 #   The full stack (moat-gateway, moat-control-plane, moat-trust-plane) builds
-#   from ../../moat which is a sibling repo not present in this checkout.
+#   from ${MOAT_DIR:-../moat}, a sibling repo not present in this checkout.
 #   The integration job clones that repo before bringing the stack up.
 #   The private_key secret file is seeded with a throwaway CI value.
 #
