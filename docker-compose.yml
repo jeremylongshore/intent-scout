@@ -52,7 +52,7 @@ services:
   # Gateway is on BOTH networks — the only bridge out of the sandbox.
   moat-gateway:
     build:
-      context: ../../moat
+      context: ${MOAT_DIR:-../moat}
       dockerfile: services/gateway/Dockerfile
     networks:
       - sandbox-internal
@@ -93,7 +93,7 @@ services:
 
   moat-control-plane:
     build:
-      context: ../../moat
+      context: ${MOAT_DIR:-../moat}
       dockerfile: services/control-plane/Dockerfile
     networks:
       - sandbox-internal
@@ -120,7 +120,7 @@ services:
 
   moat-trust-plane:
     build:
-      context: ../../moat
+      context: ${MOAT_DIR:-../moat}
       dockerfile: services/trust-plane/Dockerfile
     networks:
       - sandbox-internal
@@ -135,6 +135,11 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      # Serialize schema creation: control-plane and trust-plane share the
+      # moat DB, and concurrent create_all on a fresh volume races
+      # (UniqueViolation on pg_type), crash-looping one of them.
+      moat-control-plane:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8003/healthz || exit 1"]

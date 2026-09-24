@@ -9,7 +9,7 @@
 #
 # NOTE on docker-compose integration:
 #   The full stack (moat-gateway, moat-control-plane, moat-trust-plane) builds
-#   from ../../moat which is a sibling repo not present in this checkout.
+#   from ${MOAT_DIR:-../moat}, a sibling repo not present in this checkout.
 #   The integration job clones that repo before bringing the stack up.
 #   The private_key secret file is seeded with a throwaway CI value.
 #
@@ -250,15 +250,14 @@ jobs:
         with:
           path: intent-scout
 
-      # Clone the moat sibling repo so docker-compose build contexts resolve.
-      # Adjust the ref/branch as needed for the moat repo's default branch.
+      # Clone the moat sibling repo next to intent-scout so the compose build
+      # contexts (${MOAT_DIR:-../moat}) resolve. Moat lives at
+      # jeremylongshore/moat (public); Conway-Research/moat never existed.
       - name: Clone moat sibling repo
         uses: actions/checkout@v4
         with:
-          repository: Conway-Research/moat
+          repository: jeremylongshore/moat
           path: moat
-          # If the moat repo is private, add:
-          #   token: ${{ secrets.MOAT_REPO_TOKEN }}
 
       # docker-compose.yml mounts ${HOME}/.automaton — seed a throwaway key
       - name: Seed CI private key
@@ -272,48 +271,44 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Bring the full concentric ring stack up.
-      # --wait blocks until all healthchecks pass (or timeout).
-      - name: Start Docker stack
+      # Bring the moat ring up and wait for every healthcheck. The scout
+      # agent is not started as a service: with no config it runs its
+      # interactive first-run wizard and restarts forever, so it can never
+      # report healthy in CI. Its image is still built and exercised below.
+      - name: Start Docker stack (moat ring)
         working-directory: intent-scout
         run: |
-          docker compose up -d --build --wait --wait-timeout 180
+          docker compose build
+          docker compose up -d --wait --wait-timeout 180 \
+            postgres redis moat-control-plane moat-trust-plane moat-gateway
         env:
           IRSB_DRY_RUN: "true"
           IRSB_RPC_URL: ""
           IRSB_SOLVER_KEY: ""
 
-      # Run the integration smoke test if the script exists.
-      # Falls back to a basic healthcheck probe if the script is absent.
-      - name: Run integration tests
+      - name: Run integration probes
         working-directory: intent-scout
         run: |
-          if [ -f scripts/integration-test.sh ]; then
-            bash scripts/integration-test.sh --quick
-          else
-            echo "No integration-test.sh found — running basic healthcheck probes"
+          set -euo pipefail
+          for svc in moat-gateway:8002 moat-control-plane:8001 moat-trust-plane:8003; do
+            echo "Probing ${svc%:*}..."
+            docker compose exec -T "${svc%:*}" curl -sf "http://localhost:${svc#*:}/healthz"
+            echo
+          done
 
-            # Moat gateway healthcheck
-            echo "Probing moat-gateway..."
-            docker compose exec -T moat-gateway \
-              curl -sf http://localhost:8002/healthz \
-              && echo "moat-gateway: OK"
-
-            # Moat control-plane healthcheck
-            echo "Probing moat-control-plane..."
-            docker compose exec -T moat-control-plane \
-              curl -sf http://localhost:8001/healthz \
-              && echo "moat-control-plane: OK"
-
-            # Confirm scout container is running (it has no HTTP endpoint by default)
-            echo "Checking scout container status..."
-            STATUS=$(docker compose ps scout --format json | python3 -c \
-              "import sys,json; d=json.load(sys.stdin); print(d.get('State','unknown'))" \
-              2>/dev/null || docker compose ps scout | tail -1)
-            echo "scout status: $STATUS"
-
-            echo "Basic healthcheck probes passed."
+          # Sandbox isolation, checked from the scout image on the
+          # sandbox-internal network: moat-gateway reachable, internet not.
+          echo "Scout -> moat-gateway (must succeed)..."
+          docker compose run --rm --no-deps -T --entrypoint curl scout \
+            -sf --connect-timeout 5 http://moat-gateway:8002/healthz
+          echo
+          echo "Scout -> internet (must fail)..."
+          if docker compose run --rm --no-deps -T --entrypoint curl scout \
+               -sf --connect-timeout 5 https://api.github.com >/dev/null 2>&1; then
+            echo "::error::scout reached https://api.github.com; sandbox isolation is broken"
+            exit 1
           fi
+          echo "Sandbox isolation holds."
 
       # Always capture logs so failures are diagnosable
       - name: Collect Docker logs on failure
