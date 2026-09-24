@@ -1,0 +1,25 @@
+# Build artifacts and dependencies — reinstalled/rebuilt inside the image
+node_modules
+**/node_modules
+dist
+**/dist
+
+# VCS
+.git
+.gitignore
+
+# Vendored, non-application enforcement tooling (Intent Solutions audit-harness).
+# Not part of the runtime image; keep it out of the Docker build context so
+# `COPY . .` does not bloat layers or pull in non-application scripts.
+.audit-harness
+scripts/audit-harness
+
+# CI / local tooling
+.github
+docker-compose.yml
+*.log
+
+# Docs
+README.md
+CLAUDE.md
+constitution.md
